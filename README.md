@@ -25,29 +25,5 @@ cp .env.example .env
 python scripts/review_notebooks.py changed_notebooks.txt
 ```
 
-Alternative without .env file:
-```bash
-export RH_MODEL_API_KEY="your-api-key"
-export RH_MODEL_URL="https://your-api-endpoint.com"
-export RH_MODEL_NAME="your-model-name"
-python scripts/review_notebooks.py changed_notebooks.txt
-```
-
-## What it Reviews
-
-- Clear Header
-- Goal/Objective Present
-- Setup & Pre-Requisites
-- Markdown Usage
-- Avoid Hardcoding
-- Inline Code Comments
-- Next Steps & Conclusion
-
-Results show as: ✅ Good | ⚠️ Warning | ❌ Problem | 💡 Suggestion
-
-## Exit Codes
-
-- **0**: All notebooks passed review (no problems found)
-- **1**: One or more notebooks have problems (❌ status)
-
-In GitHub Actions, the workflow will fail if any notebook has a "problem" status.
+## Example Output
+Pull Request https://github.com/jeremyary/notebook-review-poc/pull/2
