@@ -1,0 +1,47 @@
+name: Notebook Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - '**.ipynb'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  review-notebooks:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for proper diff
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Get changed notebook files
+        id: changed-files
+        run: |
+          # Get list of changed .ipynb files in this PR
+          echo "Changed files:"
+          git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep '\.ipynb$' || true
+          
+          # Save the list to a file
+          git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep '\.ipynb$' > changed_notebooks.txt || true
+      
+      - name: Review notebooks
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python scripts/review_notebooks.py changed_notebooks.txt
