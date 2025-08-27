@@ -42,6 +42,8 @@ jobs:
       
       - name: Review notebooks
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RH_MODEL_URL: ${{ secrets.RH_MODEL_URL }}
+          RH_MODEL_API_KEY: ${{ secrets.RH_MODEL_API_KEY }}
+          RH_MODEL_NAME: ${{ secrets.RH_MODEL_NAME }}
         run: |
           python scripts/review_notebooks.py changed_notebooks.txt

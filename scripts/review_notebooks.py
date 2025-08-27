@@ -13,8 +13,9 @@ from pathlib import Path
 from typing import List
 import logging
 import nbformat
-from anthropic import Anthropic
+from openai import OpenAI
 from tabulate import tabulate
+from dotenv import load_dotenv
 
 # Set up logging
 logging.basicConfig(
@@ -44,11 +45,18 @@ def extract_notebook_text(notebook_data: nbformat.NotebookNode) -> str:
 
 
 def review_notebook(notebook_data: nbformat.NotebookNode, filepath: Path) -> str:
-    """Perform Claude-based review of the notebook."""
-    # Get API key from environment
-    api_key = os.getenv('ANTHROPIC_API_KEY')
+    """Perform model-based review of the notebook."""
+    # Get configuration from environment
+    api_key = os.getenv('RH_MODEL_API_KEY')
+    base_url = os.getenv('RH_MODEL_URL')
+    model_name = os.getenv('RH_MODEL_NAME')
+    
     if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY environment variable not set")
+        raise ValueError("RH_MODEL_API_KEY environment variable not set")
+    if not base_url:
+        raise ValueError("RH_MODEL_URL environment variable not set")
+    if not model_name:
+        raise ValueError("RH_MODEL_NAME environment variable not set")
     
     # Extract notebook text
     notebook_text = extract_notebook_text(notebook_data)
@@ -72,7 +80,7 @@ For each guideline, provide:
 - status: one of "good", "warning", "problem", or "suggestion"
 - message: a brief, actionable suggestion (or "Looks good" if no issues)
 
-Return ONLY valid JSON in this exact format. Do not wrap it in anything, provide only the JSON object:
+Return ONLY valid JSON in this exact format. Do not, under any circumstance, wrap the json in a json code display block:
 {{
   "guidelines": [
     {{"name": "Clear Header", "status": "good", "message": "Looks good"}},
@@ -82,19 +90,18 @@ Return ONLY valid JSON in this exact format. Do not wrap it in anything, provide
 }}
 """
     
-    # Call Claude
-    client = Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    response = client.chat.completions.create(
+        model=model_name,
         max_tokens=1000,
         temperature=0.3,
-        system="You are a helpful reviewer of Jupyter Notebooks.",
         messages=[
+            {"role": "system", "content": "You are a helpful reviewer of Jupyter Notebooks."},
             {"role": "user", "content": review_prompt}
         ]
     )
     
-    return response.content[0].text
+    return response.choices[0].message.content
 
 
 def format_review_as_ascii_table(json_result: str) -> str:
@@ -152,14 +159,32 @@ def format_review_as_ascii_table(json_result: str) -> str:
         return json_result
 
 
-def process_notebooks(notebook_files: List[Path]) -> None:
-    """Process and review a list of notebook files."""  
+def process_notebooks(notebook_files: List[Path]) -> bool:
+    """Process and review a list of notebook files.
+    
+    Returns:
+        True if any problems were found, False otherwise
+    """
+    has_problems = False
+    
     for notebook_file in notebook_files:
         try:
             notebook_data = load_notebook(notebook_file)
             
             result = review_notebook(notebook_data, notebook_file)
             print(f"\n## Review of {notebook_file}\n")
+            
+            # Check for problems in the JSON result
+            try:
+                data = json.loads(result)
+                guidelines = data.get("guidelines", [])
+                file_has_problems = any(g.get("status") == "problem" for g in guidelines)
+                if file_has_problems:
+                    has_problems = True
+                    print("⚠️  Problems found in this notebook\n")
+            except json.JSONDecodeError:
+                # If we can't parse JSON, assume there's a problem
+                has_problems = True
             
             # Try to format as ASCII table, fall back to raw output if needed
             formatted_result = format_review_as_ascii_table(result)
@@ -168,10 +193,16 @@ def process_notebooks(notebook_files: List[Path]) -> None:
         except Exception as e:
             logger.error(f"Failed to process {notebook_file}: {e}")
             print(f"\n❌ Error processing {notebook_file}: {e}")
+            has_problems = True
+    
+    return has_problems
 
 
 def main():
     """Main entry point"""
+    # Load .env file if it exists (for local development)
+    load_dotenv()
+    
     if len(sys.argv) != 2:
         print("Usage: python review_notebooks.py <changed_files.txt>")
         sys.exit(1)
@@ -192,14 +223,27 @@ def main():
         print("No notebook files changed in this PR")
         sys.exit(0)
     
-    # Check if API key is available
-    if not os.getenv('ANTHROPIC_API_KEY'):
-        logger.error("ANTHROPIC_API_KEY environment variable not set")
-        print("❌ Error: ANTHROPIC_API_KEY environment variable is required")
+    # Check if required environment variables are available
+    missing_vars = []
+    for var in ['RH_MODEL_API_KEY', 'RH_MODEL_URL', 'RH_MODEL_NAME']:
+        if not os.getenv(var):
+            missing_vars.append(var)
+    
+    if missing_vars:
+        logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+        print(f"❌ Error: The following environment variables are required: {', '.join(missing_vars)}")
         sys.exit(1)
     
     # Process the notebooks
-    process_notebooks(notebook_files)
+    has_problems = process_notebooks(notebook_files)
+    
+    # Exit with appropriate code
+    if has_problems:
+        print("\n❌ Review failed, problems found in one or more notebooks")
+        sys.exit(1)
+    else:
+        print("\n✅ Review passed, all notebooks look good")
+        sys.exit(0)
 
 
 if __name__ == "__main__":
